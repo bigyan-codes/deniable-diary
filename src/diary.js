@@ -4,11 +4,12 @@ import {
   completion,
   unloadModel
 } from '@qvac/sdk'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, scryptSync, timingSafeEqual, createCipheriv, createDecipheriv } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 
 const DATA_DIR = './data'
-const DATA_FILE = `${DATA_DIR}/diary.json`
+const DATA_FILE = `${DATA_DIR}/diary.enc`
+const AUTH_FILE = `${DATA_DIR}/auth.json`
 
 const DECOY_SCENARIOS = [
   'a frustrating morning when a bus was late and you had to change your plans',
@@ -40,25 +41,121 @@ function getDecoyWordRange(realEntry) {
   return { min, max }
 }
 
-async function ensureDataFile() {
+async function ensureDataDirectory() {
   await mkdir(DATA_DIR, { recursive: true })
+}
+
+function deriveKey(password, salt) {
+  return scryptSync(password, salt, 32)
+}
+
+export async function hasPassword() {
+  await ensureDataDirectory()
 
   try {
-    await readFile(DATA_FILE, 'utf8')
+    await readFile(AUTH_FILE, 'utf8')
+    return true
   } catch {
-    await writeFile(DATA_FILE, '[]', 'utf8')
+    return false
   }
 }
 
-async function readDiary() {
-  await ensureDataFile()
-  const raw = await readFile(DATA_FILE, 'utf8')
-  return JSON.parse(raw)
+export async function setupPassword(password) {
+  if (!password || password.length < 6) {
+    throw new Error('Password must be at least 6 characters.')
+  }
+
+  await ensureDataDirectory()
+
+  if (await hasPassword()) {
+    throw new Error('A password has already been set.')
+  }
+
+  const salt = randomBytes(16)
+  const hash = deriveKey(password, salt)
+
+  await writeFile(
+    AUTH_FILE,
+    JSON.stringify({
+      salt: salt.toString('base64'),
+      hash: hash.toString('base64')
+    }, null, 2),
+    'utf8'
+  )
+
+  await writeEncryptedDiary([], password)
 }
 
-async function writeDiary(entries) {
-  await ensureDataFile()
-  await writeFile(DATA_FILE, JSON.stringify(entries, null, 2), 'utf8')
+export async function verifyPassword(password) {
+  await ensureDataDirectory()
+
+  try {
+    const auth = JSON.parse(await readFile(AUTH_FILE, 'utf8'))
+    const salt = Buffer.from(auth.salt, 'base64')
+    const storedHash = Buffer.from(auth.hash, 'base64')
+    const suppliedHash = deriveKey(password, salt)
+
+    return timingSafeEqual(storedHash, suppliedHash)
+  } catch {
+    return false
+  }
+}
+
+async function readEncryptedDiary(password) {
+  await ensureDataDirectory()
+
+  let encrypted
+
+  try {
+    encrypted = JSON.parse(await readFile(DATA_FILE, 'utf8'))
+  } catch {
+    return []
+  }
+
+  const salt = Buffer.from(encrypted.salt, 'base64')
+  const iv = Buffer.from(encrypted.iv, 'base64')
+  const authTag = Buffer.from(encrypted.authTag, 'base64')
+  const ciphertext = Buffer.from(encrypted.data, 'base64')
+
+  const key = deriveKey(password, salt)
+
+  const decipher = createDecipheriv('aes-256-gcm', key, iv)
+  decipher.setAuthTag(authTag)
+
+  const decrypted = Buffer.concat([
+    decipher.update(ciphertext),
+    decipher.final()
+  ])
+
+  return JSON.parse(decrypted.toString('utf8'))
+}
+
+async function writeEncryptedDiary(entries, password) {
+  await ensureDataDirectory()
+
+  const salt = randomBytes(16)
+  const iv = randomBytes(12)
+  const key = deriveKey(password, salt)
+
+  const cipher = createCipheriv('aes-256-gcm', key, iv)
+
+  const encrypted = Buffer.concat([
+    cipher.update(JSON.stringify(entries), 'utf8'),
+    cipher.final()
+  ])
+
+  const authTag = cipher.getAuthTag()
+
+  await writeFile(
+    DATA_FILE,
+    JSON.stringify({
+      salt: salt.toString('base64'),
+      iv: iv.toString('base64'),
+      authTag: authTag.toString('base64'),
+      data: encrypted.toString('base64')
+    }, null, 2),
+    'utf8'
+  )
 }
 
 async function generateDecoy(modelId, scenario, wordRange) {
@@ -95,7 +192,7 @@ Requirements:
   return text.trim()
 }
 
-export async function createDiaryBatch(realEntry, onProgress = () => {}) {
+export async function createDiaryBatch(realEntry, password, onProgress = () => {}) {
   if (!realEntry || !realEntry.trim()) {
     throw new Error('Diary entry cannot be empty.')
   }
@@ -140,11 +237,12 @@ export async function createDiaryBatch(realEntry, onProgress = () => {}) {
       entries
     }
 
-    const existing = await readDiary()
+    const existing = await readEncryptedDiary(password)
     existing.push(batch)
-    await writeDiary(existing)
 
-    onProgress('Diary saved locally.')
+    await writeEncryptedDiary(existing, password)
+
+    onProgress('Diary encrypted and saved locally.')
 
     return batch
   } finally {
@@ -152,6 +250,6 @@ export async function createDiaryBatch(realEntry, onProgress = () => {}) {
   }
 }
 
-export async function getDiary() {
-  return readDiary()
+export async function getDiary(password) {
+  return readEncryptedDiary(password)
 }
