@@ -1,61 +1,112 @@
 # 📝 Deniable Diary
 
-> A privacy-focused diary that creates plausible decoy entries using **local, on-device AI**.
+> A privacy-focused diary that uses Tether QVAC to generate plausible decoy entries entirely on-device.
 
-Deniable Diary lets you write a real diary entry, then uses the **Tether QVAC SDK** to generate three fictional alternatives. The four entries are shuffled and stored together without labels.
+Deniable Diary lets you write a real diary entry and then uses a local QVAC language model to generate three fictional diary entries. The real entry and the three decoys are shuffled together without labels.
 
-The goal is simple: if someone looks at your diary, there is no obvious way to tell which entry is the real one.
+The idea is simple: if someone opens the diary, there is no obvious label identifying which entry is the original.
 
-## ✨ How It Works
+## 🤖 QVAC at a Glance
+
+This project uses the **Tether QVAC SDK** for local AI inference.
+
+**QVAC SDK:** `@qvac/sdk` `^0.20.0`
+
+The application calls:
+
+* `loadModel()` — loads the local QVAC language model
+* `completion()` — generates the three fictional diary entries
+* `unloadModel()` — releases the model after generation
+
+**Model:** `LLAMA_3_2_1B_INST_Q4_0`
+
+The AI generation is performed locally through QVAC. No cloud AI API key is required.
+
+## 🔐 How the App Works
 
 ```text
-Write your real diary entry
-          ↓
-Calculate its approximate length locally
-          ↓
-QVAC generates 3 unrelated fictional entries
-          ↓
-Combine real entry + 3 decoys
-          ↓
-Shuffle all 4 entries
-          ↓
-Store locally without labels
+                    USER
+                      │
+                      ▼
+              Writes real entry
+                      │
+             ┌────────┴────────┐
+             │                 │
+             ▼                 ▼
+       Local storage      Local word count
+        (encrypted)             │
+                                 ▼
+                         Target word range
+                                 │
+                                 ▼
+                       Unrelated scenarios
+                                 │
+                                 ▼
+                         QVAC loadModel()
+                                 │
+                                 ▼
+                       QVAC completion()
+                          × 3 decoys
+                                 │
+             ┌───────────────────┴──────────────────┐
+             │                                      │
+             ▼                                      ▼
+        Real entry                              3 decoys
+             │                                      │
+             └───────────────────┬──────────────────┘
+                                 ▼
+                         Shuffle locally
+                                 │
+                                 ▼
+                         Encrypt and save
 ```
 
-### 🔒 Privacy by design
+### Important privacy property
 
-The most important part of the implementation is that **your real diary text is never given to the QVAC model**.
+The real diary entry is **not included in the QVAC generation prompt**.
 
 QVAC receives only:
 
-* An unrelated fictional scenario
-* A locally calculated target word range
+* an unrelated fictional scenario
+* an approximate target word range
+* instructions for writing a fictional diary entry
 
-This prevents the model from using private details from the real entry when generating the decoys.
+The model does not receive the user's actual diary story or previous diary entries.
 
-**No cloud AI API is required.**
+### 🔒 Local Encryption
 
----
+Diary batches are stored locally in:
 
-## 🤖 Why QVAC?
+```text
+data/diary.enc
+```
 
-Deniable Diary is specifically designed around **on-device AI**.
+The diary data is encrypted using **AES-256-GCM**.
 
-A cloud-based implementation would introduce an unnecessary privacy problem for a diary application. QVAC allows the language model to run locally so the decoy-generation process can happen on the user's device.
+The encryption key is derived from the user's password using Node.js `scrypt`.
 
-The project uses the QVAC SDK's:
+The application also stores a password verification record in:
 
-* `loadModel()`
-* `completion()`
-* `unloadModel()`
+```text
+data/auth.json
+```
 
-### Model
+The `data/` directory is excluded from Git, so local diary data is not committed to the repository.
 
-The MVP uses:
+### Important limitation
 
-`LLAMA_3_2_1B_INST_Q4_0`
+The password is kept in the server's in-memory session while the local application is running. This project is an experimental hackathon MVP, not a production security product.
 
----
+## ✨ Features
+
+* 📝 Write a private diary entry
+* 🤖 Generate three AI-written decoys locally
+* 🎲 Shuffle the real entry and decoys
+* 🔒 Password-protected local diary
+* 🔐 AES-256-GCM encrypted diary storage
+* 🧠 QVAC local language-model inference
+* ☁️ No cloud AI API required
+* 🚫 Real diary text is excluded from the QVAC prompt
 
 ## 🚀 Installation
 
@@ -78,206 +129,162 @@ cd deniable-diary
 npm install
 ```
 
+The project declares the QVAC SDK as a dependency:
+
+```json
+"@qvac/sdk": "^0.20.0"
+```
+
 ### 3. Start the application
 
 ```bash
 npm start
 ```
 
-You should see:
-
-```text
-📝 Deniable Diary is running!
-Open: http://localhost:3000
-```
-
-Open the application in your browser:
+The application runs at:
 
 ```text
 http://localhost:3000
 ```
 
+Open that address in your browser.
+
 ### First run
 
-On the first generation, QVAC may need to download the local language model. This can take some time depending on your internet connection and machine.
+On the first generation, QVAC may download the required local model. The initial model setup can take time depending on the machine and internet connection.
 
-After the model is available locally, diary generation happens **on-device**.
+After the model is available, inference is performed locally by QVAC.
 
----
+## 🧪 How to Use
 
-## 🧪 Try It
+### First launch
 
-1. Open `http://localhost:3000`
-2. Write a diary entry.
-3. Click **Save privately**.
-4. Wait while QVAC generates three decoys.
-5. The application displays four unlabeled entries.
-6. Only you know which one is the original.
+1. Open `http://localhost:3000`.
+2. Create a diary password.
+3. Write a real diary entry.
+4. Click **Save privately**.
+5. Wait while QVAC loads the local model and generates three decoys.
+6. The application combines the real entry with the three decoys.
+7. The four entries are shuffled and displayed without labels.
 
-### Example
+### Returning to the diary
+
+1. Open the application.
+2. Enter the diary password.
+3. The encrypted diary is unlocked locally.
+4. Previously saved batches can be viewed.
+
+### Locking the diary
+
+Click **Lock Diary** to end the current authenticated session.
+
+## 🛡️ Privacy Architecture
+
+The privacy boundary is intentionally simple:
 
 ```text
-             Your real entry
-                   +
-          3 fictional entries
-                   ↓
-          ┌─────────────────┐
-          │   Entry 1       │
-          │   Entry 2       │
-          │   Entry 3       │
-          │   Entry 4       │
-          └─────────────────┘
-                   ↓
-             Randomly shuffled
+REAL DIARY ENTRY
+       │
+       ├──► Local word-count calculation
+       │
+       └──► Encrypted local storage
+
+
+UNRELATED SCENARIO
+       │
+       ▼
+  QVAC MODEL
+       │
+       ▼
+ FICTIONAL DECOY
+       │
+       ├──► Decoy 1
+       ├──► Decoy 2
+       └──► Decoy 3
+
+
+REAL ENTRY + DECOYS
+       │
+       ▼
+ LOCAL SHUFFLE
+       │
+       ▼
+ ENCRYPTED STORAGE
 ```
 
----
-
-## 🛡️ Privacy Model
-
-Deniable Diary is built around a simple privacy principle:
-
-> **The AI should generate the decoys without reading the user's private story.**
-
-### What QVAC receives
-
-✅ Unrelated fictional scenarios
-✅ Approximate target length
-
-### What QVAC does NOT receive
-
-❌ The real diary entry
-❌ The user's personal details
-❌ The user's previous diary entries
-
-Diary data is stored locally in the application's `data/` directory.
-
-The `data/` directory is excluded from Git through `.gitignore`.
-
----
+The real diary content never needs to be sent to a remote AI service.
 
 ## 📁 Project Structure
 
 ```text
 deniable-diary/
 ├── src/
-│   ├── diary.js          # Diary storage and QVAC decoy generation
-│   ├── server.js         # Local web server and UI
-│   ├── index.js          # Application entry point
-│   └── test-qvac.js      # QVAC integration test
+│   ├── diary.js        # QVAC integration, encryption, diary storage
+│   ├── server.js       # Local HTTP server and web interface
+│   ├── index.js        # Application entry point
+│   └── test-qvac.js    # QVAC integration test
 │
-├── data/                 # Local diary data (gitignored)
-├── prd.md                # Product requirements document
+├── data/               # Local encrypted diary data (gitignored)
+├── prd.md              # Product requirements document
 ├── README.md
 ├── LICENSE
 ├── package.json
-└── .gitignore
+└── package-lock.json
 ```
-
----
 
 ## ⚙️ Tech Stack
 
-| Technology      | Purpose             |
-| --------------- | ------------------- |
-| Node.js         | Application runtime |
-| JavaScript      | Application logic   |
-| Tether QVAC SDK | Local AI inference  |
-| QVAC LLM        | Decoy generation    |
-| Node HTTP       | Local web server    |
-| Local JSON      | Diary storage       |
+| Technology      | Purpose                                        |
+| --------------- | ---------------------------------------------- |
+| Node.js         | Application runtime                            |
+| JavaScript      | Application logic                              |
+| Tether QVAC SDK | On-device AI inference                         |
+| QVAC LLM        | Decoy generation                               |
+| Node HTTP       | Local web server                               |
+| Node Crypto     | Password derivation and AES-256-GCM encryption |
+| Local files     | Encrypted diary storage                        |
 
----
+## 🎯 Hackathon Requirement Mapping
 
-## 🎯 Hackathon Focus
-
-Deniable Diary was built for the **QVAC Hackathon** to explore a privacy-first use case for local AI.
-
-The project demonstrates:
-
-* ⚡ On-device AI inference
-* 🔒 No remote AI API required
-* 🧠 QVAC model loading and completion
-* 📝 Local diary generation
-* 🎲 AI-generated plausible decoys
-* 🛡️ Keeping the user's real diary text outside the AI prompt
-
-The project is designed to demonstrate how local AI can enable experiences where sending private user content to a remote AI service would undermine the purpose of the application.
-
----
-
-## 🔐 Privacy Architecture
-
-The real diary entry follows this path:
-
-```text
-User's diary entry
-       │
-       ├──► Local word-count calculation
-       │
-       └──► Stored locally
-       
-Unrelated scenarios
-       │
-       ▼
-   QVAC model
-       │
-       ▼
-  3 fictional decoys
-       │
-       ▼
-Real entry + 3 decoys
-       │
-       ▼
-Randomized collection
-```
-
-The real diary content is **not included in the QVAC generation prompt**.
-
----
+| Requirement                        | Implementation                                                  |
+| ---------------------------------- | --------------------------------------------------------------- |
+| QVAC SDK dependency                | `@qvac/sdk ^0.20.0`                                             |
+| `loadModel()`                      | `src/diary.js`                                                  |
+| `completion()`                     | `src/diary.js`                                                  |
+| `unloadModel()`                    | `src/diary.js`                                                  |
+| On-device inference                | QVAC local model                                                |
+| Public GitHub repository           | This repository                                                 |
+| Open-source license                | MIT License                                                     |
+| README                             | This file                                                       |
+| Local privacy use case             | Deniable Diary                                                  |
+| No cloud AI API                    | QVAC inference is local                                         |
+| Real diary excluded from AI prompt | `generateDecoy()` only receives fictional scenario + word range |
 
 ## ⚠️ Current MVP Limitations
 
-This is an experimental MVP.
+This is an experimental hackathon MVP.
 
-* Local diary storage is currently plain JSON rather than encrypted storage.
-* The app does not provide cryptographic proof that an entry is genuine or fake.
-* Decoy quality depends on the local language model.
-* The application is designed to demonstrate the concept rather than provide production-grade secure storage.
+* Decoy quality depends on the local QVAC model.
+* The application is not intended to provide production-grade security.
+* The application requires the QVAC model to be available locally.
+* The local Node server keeps the authenticated password in memory for the active session.
+* Losing the diary password means the encrypted diary cannot be recovered through the application.
 
-These limitations are intentionally documented rather than hidden.
+## 🔮 Possible Future Improvements
 
----
-
-## 🔮 Future Improvements
-
-Possible future versions could include:
-
-* 🔐 Encrypted local diary storage
-* ✍️ More natural and varied decoy generation
-* 🎲 Stronger randomization
-* 📱 Mobile-friendly interface
-* 🔑 Optional local authentication
-* 🧠 Additional local QVAC models
-* 🗂️ Better diary organization and search
-
----
+* More sophisticated decoy generation
+* Mobile-focused interface
+* Additional QVAC models
+* Stronger session management
+* Better diary organization
+* Additional local privacy controls
 
 ## 📄 License
 
 This project is released under the **MIT License**.
 
----
+See the [LICENSE](./LICENSE) file for the full license text.
 
 ## 🔗 Repository
 
-**GitHub:**
 https://github.com/bigyan-codes/deniable-diary
-
----
-
-## 🙌 Built With
-
-Built with **Node.js** and the **Tether QVAC SDK** for the QVAC Hackathon.
-
-**Local AI. Private data. Plausible deniability.**
